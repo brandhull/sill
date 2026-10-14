@@ -29,6 +29,8 @@ struct MenuEntry: Equatable {
         case showPairingRequest(name: String, showing: Bool)
         /// Sill 0.4 Is Available…: the release's page on GitHub, in the browser (UpdateChecker).
         case openUpdate(URL)
+        /// Stream Window ▸: this source, picked on the Mac instead of on the device.
+        case streamSource(StreamSource)
     }
 
     var kind: Kind
@@ -62,7 +64,8 @@ enum MenuBuilder {
     /// glyph means Sill needs the person before it can work, and an update needs nothing.
     static func entries(presentation p: StatusPresentation, config: HostConfig, login: LoginState,
                         permissions: PermissionState,
-                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil) -> [MenuEntry] {
+                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil,
+                        windows: [WindowInfo] = [], streaming: StreamSource = .none) -> [MenuEntry] {
         var menu: [MenuEntry] = [MenuEntry(kind: .card, title: p.header)]
         for a in p.attention {
             let action: MenuEntry.Action = switch a.action {
@@ -81,6 +84,19 @@ enum MenuBuilder {
                                   subtitle: UpdatePolicy.menuSubtitle(running: update.running), action: .openUpdate(update.offer.url)))
         }
         menu.append(.separator)
+
+        // Which window the device shows, picked here when the device is out of reach (a phone
+        // propped on a stand mid-call). Only while the Mac has listed windows to pick from.
+        if !windows.isEmpty {
+            var choices = [MenuEntry(kind: .item, title: "Whole Desktop", checked: streaming == .desktop, action: .streamSource(.desktop))]
+            choices.append(.separator)
+            choices += windows.map { w in
+                let label = w.title.isEmpty ? w.appName : "\(w.appName) — \(w.title)"
+                return MenuEntry(kind: .item, title: StatusText.middleTruncated(label, to: 44),
+                                 checked: streaming == .window(w.id), action: .streamSource(.window(w.id)))
+            }
+            menu.append(MenuEntry(kind: .item, title: "Stream Window", subtitle: "Pick an app window to stream to iOS", children: choices))
+        }
 
         menu.append(MenuEntry(kind: .item, title: "Virtual Display", subtitle: p.virtualDisplayNote,
                               checked: config.virtualDisplay, action: .setVirtualDisplay(!config.virtualDisplay)))
@@ -155,7 +171,8 @@ enum MenuBuilder {
                                           accessibility: model.permissions.accessibility)
         let update = model.updates.offer.flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
         return entries(presentation: model.presentation, config: model.settings.config, login: login, permissions: permissions,
-                       update: update)
+                       update: update, windows: model.coordinator?.windowChoices ?? [],
+                       streaming: model.coordinator?.active ?? .none)
     }
 
     /// The menu as text, for the previews: "✓" checked, "⚠" attention, "(off)" disabled.
@@ -300,6 +317,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .showPairing: model.pairDevice()
         case .showPairingRequest(let name, let showing): model.showPairingRequest(name: name, showing: showing)
         case .openUpdate(let url): NSWorkspace.shared.open(url)   // the browser; no modal loop
+        case .streamSource(let source): model.coordinator?.pickFromMac(source)
         case .quit: NSApp.terminate(nil)
         }
     }
