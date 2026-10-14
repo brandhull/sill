@@ -1724,6 +1724,16 @@ package final class StreamCoordinator {
 
     // MARK: Source switching
 
+    /// The windows a pick can name, as the catalog last listed them: what a device's switcher shows.
+    package var windowChoices: [WindowInfo] { catalog.infos }
+
+    /// A pick made on the Mac itself (the menu bar's Stream Window submenu), for when the device
+    /// is out of reach. It takes the same path as a device's pick, so a switch already running
+    /// queues it and the window comes forward as any pick does.
+    package func pickFromMac(_ source: StreamSource) {
+        Task { await handlePick(source) }
+    }
+
     /// A pick from a device's switcher, and one that waited out a restart (select's defer): one
     /// rule for both, so a queued pick is not lost to a select that starts before its Task runs.
     /// While the active source restarts (a settings change, a resize, a rate change, the encoder
