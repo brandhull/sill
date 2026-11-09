@@ -103,6 +103,8 @@ enum DuoLayout {
 struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
+    /// Landscape: the top bar is folded away, leaving the whole screen to the Mac.
+    @AppStorage("landscapeBarCollapsed") private var barCollapsed = false
     @State private var keyboardShown = false
     /// Modifiers held down by the portrait key row until the next key, character or click uses
     /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
@@ -1169,6 +1171,7 @@ struct StreamScreen: View {
         // The book pose (docs/iphone-duo-plan.md, (a)): nothing on the fold's band; elsewhere as before.
         let (bar, stripWidth) = plain.clearing(fold, width: width)
         return VStack(spacing: 0) {
+            if !barCollapsed {
             TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
@@ -1180,8 +1183,36 @@ struct StreamScreen: View {
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
                    menusOpened: menusOpened, menusClosed: menusClosed)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            }
             contentArea(bar: bar)
+                .overlay(alignment: .top) { barToggle }
         }
+        .clipped()
+    }
+
+    /// A small tab at the top centre of the picture that folds the bar away or brings it back.
+    private var barToggle: some View {
+        Button {
+            if !barCollapsed {
+                setSettings(false, restoreKeyboard: false)
+                drawerOpen = false
+                windowMenu = nil
+                scaleOpen = false
+            }
+            withAnimation(.easeOut(duration: 0.2)) { barCollapsed.toggle() }
+        } label: {
+            Image(systemName: barCollapsed ? "chevron.compact.down" : "chevron.compact.up")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 60, height: 32)
+                .background(.black.opacity(0.45), in: Capsule())
+                .frame(width: 92, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, barCollapsed ? 0 : 4)
+        .accessibilityLabel(barCollapsed ? "Show the bar" : "Hide the bar")
     }
 
     /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.
