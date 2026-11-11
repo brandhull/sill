@@ -660,7 +660,7 @@ package final class StreamCoordinator {
             // 2026-11-01), and a device asks for the Desktop again the moment nothing streams: the lock is
             // read again first, so that pick meets the new reading (LockPolicy; the placeholder off console).
             SessionLock.shared.lookNow(cause: "the capture stopped")
-            Task { @MainActor in await self?.select(.none) }
+            Task { @MainActor in await self?.captureStopped() }
         }
         // Status for the menu bar app. The server's callbacks hop here from its network queue; the
         // stats tick runs on the main queue, which under the CLI's dispatchMain is drained by a
@@ -2345,6 +2345,9 @@ package final class StreamCoordinator {
     /// Consecutive catalog polls the streamed window has been missing from the list while it may be
     /// entering or leaving full screen: the staged full-screen window, or in regular mode one that was
     /// full screen when last listed or that Sill fitted (`windowsChanged`).
+    /// When the capture of a still-listed window stopped on its own, in the last 30 s: the window is
+    /// picked again up to three times before the device is left with nothing (`captureStopped`).
+    private var recoveryTimes: [Date] = []
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
     private var lastActivationAt: CFAbsoluteTime = 0
@@ -3249,6 +3252,30 @@ package final class StreamCoordinator {
         recheckTask?.cancel()   // ends the held-back loop's sleep; its tail starts a new loop while a device is connected
     }
 
+    /// The capture ended without anyone choosing that. For a window that is still there (macOS ended
+    /// its capture for a moment: "Failed to find any displays or windows to capture", seen on
+    /// 2026-11-10 mid-call), the same window is picked again, up to three times in 30 s, instead of
+    /// leaving the device with nothing, which sends it to the Desktop. Anything else, or a window that
+    /// keeps failing, ends the source as before.
+    private func captureStopped() async {
+        let was = active
+        if case .window(let id) = was, !shuttingDown, !lockReading.locked,
+           catalog.window(id: id) != nil || Self.liveBounds(of: id) != nil {
+            recoveryTimes.removeAll { Date().timeIntervalSince($0) > 30 }
+            if recoveryTimes.count < 3 {
+                recoveryTimes.append(Date())
+                print("The capture of window \(id) stopped but the window is still there: picking it again (\(recoveryTimes.count) of 3 in 30 s).")
+                try? await Task.sleep(for: .milliseconds(500))
+                guard active == was else { return }   // another source was picked meanwhile
+                await select(was)
+                return
+            }
+            print("The capture of window \(id) keeps stopping: giving up on it.")
+        }
+        print("Streaming stopped: the capture ended (\(was)).")
+        await select(.none)
+    }
+
     private func windowsChanged(_ infos: [WindowInfo]) async {
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
@@ -3280,7 +3307,18 @@ package final class StreamCoordinator {
                         broadcastList(); return
                     }
                     missingPolls = 0
+                } else if virtualDisplay, stage.isStaged {
+                    // Staged on the virtual display and neither listed nor found by its id: one such look
+                    // is not a close (a window can be gone for a moment while its app redraws or macOS
+                    // reshuffles displays), so it gets the same three looks before the source ends.
+                    missingPolls += 1
+                    if missingPolls <= 3 {
+                        print("Window \(id) is not in the window list (look \(missingPolls) of 3); still streaming it.")
+                        broadcastList(); return
+                    }
+                    missingPolls = 0
                 }
+                print("Streaming stopped: window \(id) has left the window list.")
                 await select(.none); return
             }
             missingPolls = 0
