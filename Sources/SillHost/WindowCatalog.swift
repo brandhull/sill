@@ -114,7 +114,7 @@ final class WindowCatalog {
 
     /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
     /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
+    /// exists, so pick by ID. No longer read: the main display is preferred with or without it.
     var preferMainDisplay = false
 
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
@@ -298,9 +298,10 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        // The Desktop is the Mac's main display (the one with the menu bar), always: the order of
+        // `SCShareableContent.displays` is not guaranteed once a second display exists, and a Mac
+        // with an iPad or other extended display listed it first on some looks (2026-11-10).
+        display = content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
